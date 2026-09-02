@@ -1,13 +1,16 @@
 import { TUNNEL_DURATION, getTunnelDiameter } from "../tunnel/tunnelConfig.js";
 
 const MEADOW_RADIUS = 62;
+// Keep every original inner vertex; add shared outer rings at decreasing detail.
+// The distant perimeter is below a pixel at eye height, not a nearby terrain edge.
+const MEADOW_OUTER_RADII = [
+  66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118,
+  122, 126, 130, 134, 138, 142, 175, 220, 300, 450, 700, 1100, 2000,
+];
 const CAMERA_START_RETREAT = 12;
 const ROUTE_LANDSCAPE_EXTRA_LENGTH = 18;
-const ROUTE_LANDSCAPE_HALF_WIDTH_START = 36;
-const ROUTE_LANDSCAPE_HALF_WIDTH_END = 30;
-const ROUTE_LANDSCAPE_SECTIONS = 48;
-const ROUTE_LANDSCAPE_LATERAL_STEPS = 20;
 const ROUTE_GRASS_COUNT = 9000;
+const REAR_MEADOW_GRASS_COUNT = 15000;
 const DENSE_GRASS_ZONES = [
   { count: 35000, innerRadius: 1.8, outerRadius: 22 },
   { count: 25000, innerRadius: 22, outerRadius: 42 },
@@ -93,6 +96,7 @@ export async function createDreamyIdyll(scene, startPosition) {
     embeddedGrassSource,
     house,
     vegetation.entries,
+    meadow,
   );
   const atmosphere = createAtmosphere(scene, world, startPosition, vegetation.swayAnchors, sky);
   let routeExtension = null;
@@ -120,6 +124,7 @@ export async function createDreamyIdyll(scene, startPosition) {
           mountains[0],
           libraries,
           vegetation,
+          house,
         );
       }
       return routeExtension;
@@ -168,11 +173,12 @@ async function loadEmbeddedGrassPatchSource(scene, world) {
   return source;
 }
 
-function createEmbeddedGrassPatches(world, startPosition, source, house, vegetationEntries) {
+function createEmbeddedGrassPatches(world, startPosition, source, house, vegetationEntries, meadow) {
   const patches = createEmbeddedGrassPatchLayout(startPosition, house, vegetationEntries);
+  const surface = createMeadowSurfaceSampler(meadow);
   patches.forEach((patch, index) => {
     const instance = source.createInstance(`dreamy-embedded-grass-patch-${index + 1}`);
-    const groundY = getEmbeddedGrassPlateGroundY(patch, startPosition);
+    const groundY = getEmbeddedGrassPlateGroundY(patch, startPosition, surface);
     instance.parent = world;
     instance.position.set(
       startPosition.x + patch.x,
@@ -186,7 +192,7 @@ function createEmbeddedGrassPatches(world, startPosition, source, house, vegetat
   });
 }
 
-function getEmbeddedGrassPlateGroundY(patch, startPosition) {
+function getEmbeddedGrassPlateGroundY(patch, startPosition, surface) {
   let lowestGroundY = Number.POSITIVE_INFINITY;
   const cosine = Math.cos(patch.rotation);
   const sine = Math.sin(patch.rotation);
@@ -198,7 +204,9 @@ function getEmbeddedGrassPlateGroundY(patch, startPosition) {
       const localZ = vertical * EMBEDDED_GRASS_PLATE_HALF_EXTENT * patch.scale;
       const worldX = startPosition.x + patch.x + localX * cosine - localZ * sine;
       const worldZ = startPosition.z + patch.z + localX * sine + localZ * cosine;
-      lowestGroundY = Math.min(lowestGroundY, getMeadowHeight(worldX, worldZ, startPosition));
+      const hit = surface.at(worldX, worldZ);
+      if (!hit) throw new Error("Gras.glb plate is outside the meadow surface.");
+      lowestGroundY = Math.min(lowestGroundY, hit.point.y);
     });
   });
   return lowestGroundY;
@@ -253,7 +261,12 @@ function isEmbeddedGrassPatchClear(patch, startPosition, house, exclusions) {
 }
 
 function createRollingMeadow(scene, world, startPosition) {
-  const rings = 32;
+  const innerRings = 32;
+  const radii = [
+    ...Array.from({ length: innerRings }, (_, index) => MEADOW_RADIUS * (index + 1) / innerRings),
+    ...MEADOW_OUTER_RADII,
+  ];
+  const rings = radii.length;
   const sectors = 96;
   const positions = [startPosition.x, getMeadowHeight(startPosition.x, startPosition.z, startPosition), startPosition.z];
   const normals = [0, 1, 0];
@@ -261,14 +274,23 @@ function createRollingMeadow(scene, world, startPosition) {
   const indices = [];
 
   for (let ring = 1; ring <= rings; ring += 1) {
-    const radius = MEADOW_RADIUS * ring / rings;
+    const radius = radii[ring - 1];
     for (let sector = 0; sector < sectors; sector += 1) {
       const angle = sector / sectors * Math.PI * 2;
       const organicEdge = 1 + Math.sin(angle * 5.0) * 0.025 + Math.sin(angle * 9.0 + 0.7) * 0.014;
       const x = startPosition.x + Math.cos(angle) * radius * organicEdge;
       const z = startPosition.z + Math.sin(angle) * radius * organicEdge;
       const shade = 0.93 + Math.sin(x * 0.25 + z * 0.17) * 0.045 + Math.cos(z * 0.43) * 0.025;
-      positions.push(x, getMeadowHeight(x, z, startPosition), z);
+      // The added rings share the original edge, winding, vertex colours and
+      // material. Fade only their height to gentle lowland, never a rising rim.
+      const edgeX = startPosition.x + Math.cos(angle) * MEADOW_RADIUS * organicEdge;
+      const edgeZ = startPosition.z + Math.sin(angle) * MEADOW_RADIUS * organicEdge;
+      const outerBlend = smoothstep((radius - MEADOW_RADIUS) / 48);
+      const outerHeight = Math.sin(x * 0.045 + z * 0.031) * 0.12;
+      const height = ring <= innerRings
+        ? getMeadowHeight(x, z, startPosition)
+        : BABYLON.Scalar.Lerp(getMeadowHeight(edgeX, edgeZ, startPosition), outerHeight, outerBlend);
+      positions.push(x, height, z);
       normals.push(0, 1, 0);
       colors.push(0.36 * shade, 0.58 * shade, 0.28 * shade, 1);
     }
@@ -317,8 +339,10 @@ function createRouteLandscapeExtension(
   hillSource,
   libraries,
   vegetation,
+  house,
 ) {
-  const terrain = [createRouteMeadowStrip(scene, world, startPosition, route, meadow.material)];
+  const terrain = [meadow];
+  const surface = createMeadowSurfaceSampler(meadow);
   const propExclusions = createRouteVegetation(
     scene,
     world,
@@ -326,8 +350,10 @@ function createRouteLandscapeExtension(
     route,
     libraries,
     vegetation,
+    surface,
   );
-  const grass = createRouteGrass(scene, world, startPosition, route, libraries, propExclusions);
+  const meadowExclusions = createGrassExclusions(house, vegetation.entries);
+  const grass = createRouteGrass(scene, world, startPosition, route, libraries, propExclusions, surface, meadowExclusions);
   const hills = createRouteHills(world, startPosition, route, hillSource);
   return {
     terrain,
@@ -337,69 +363,7 @@ function createRouteLandscapeExtension(
   };
 }
 
-function createRouteMeadowStrip(scene, world, startPosition, route, material) {
-  const positions = [];
-  const normals = [];
-  const colors = [];
-  const indices = [];
-  const totalDistance = route.length + ROUTE_LANDSCAPE_EXTRA_LENGTH;
-
-  for (let section = 0; section <= ROUTE_LANDSCAPE_SECTIONS; section += 1) {
-    const progress = section / ROUTE_LANDSCAPE_SECTIONS;
-    const distance = progress * totalDistance;
-    const frame = routeLandscapeFrame(route, distance);
-    const outerOffset = BABYLON.Scalar.Lerp(
-      ROUTE_LANDSCAPE_HALF_WIDTH_START,
-      ROUTE_LANDSCAPE_HALF_WIDTH_END,
-      progress,
-    );
-
-    for (let lateralStep = 0; lateralStep <= ROUTE_LANDSCAPE_LATERAL_STEPS; lateralStep += 1) {
-      const lateralRatio = lateralStep / ROUTE_LANDSCAPE_LATERAL_STEPS * 2 - 1;
-      const edgeRatio = Math.abs(lateralRatio);
-      const offset = outerOffset * lateralRatio;
-      const x = frame.position.x + frame.lateral.x * offset;
-      const z = frame.position.z + frame.lateral.z * offset;
-      const y = getRouteLandscapeHeight(x, z, startPosition, progress, edgeRatio);
-      const shade = 0.95 + Math.sin(x * 0.19 + z * 0.13) * 0.035;
-      const distanceMute = BABYLON.Scalar.Lerp(1, 0.82, smoothstep(progress));
-      positions.push(x, y, z);
-      normals.push(0, 1, 0);
-      colors.push(
-        0.36 * shade * distanceMute,
-        0.58 * shade * distanceMute,
-        0.28 * shade * distanceMute,
-        1,
-      );
-    }
-  }
-
-  const stride = ROUTE_LANDSCAPE_LATERAL_STEPS + 1;
-  for (let section = 0; section < ROUTE_LANDSCAPE_SECTIONS; section += 1) {
-    for (let lateralStep = 0; lateralStep < ROUTE_LANDSCAPE_LATERAL_STEPS; lateralStep += 1) {
-      const current = section * stride + lateralStep;
-      const next = current + stride;
-      indices.push(current, next, next + 1, current, next + 1, current + 1);
-    }
-  }
-
-  BABYLON.VertexData.ComputeNormals(positions, indices, normals);
-  const mesh = new BABYLON.Mesh("dreamy-route-meadow-strip", scene);
-  const vertexData = new BABYLON.VertexData();
-  vertexData.positions = positions;
-  vertexData.normals = normals;
-  vertexData.colors = colors;
-  vertexData.indices = indices;
-  vertexData.applyToMesh(mesh);
-  mesh.material = material;
-  mesh.parent = world;
-  mesh.isPickable = false;
-  mesh.receiveShadows = false;
-  mesh.metadata = { ...(mesh.metadata ?? {}), grassReceiver: true, routeLandscape: true };
-  return mesh;
-}
-
-function createRouteVegetation(scene, world, startPosition, route, libraries, vegetation) {
+function createRouteVegetation(scene, world, startPosition, route, libraries, vegetation, surface) {
   const random = createRandom(48271);
   const exclusions = [];
   const treeTypes = ["CommonTree_1", "CommonTree_3", "CommonTree_2", "CommonTree_4"];
@@ -417,7 +381,7 @@ function createRouteVegetation(scene, world, startPosition, route, libraries, ve
     const lateralDistance = (8 + random() * 17) * side;
     const x = frame.position.x + frame.lateral.x * lateralDistance;
     const z = frame.position.z + frame.lateral.z * lateralDistance;
-    const groundY = getRouteLandscapeHeight(x, z, startPosition, progress, Math.abs(lateralDistance) / 36);
+    const groundY = surface.at(x, z).point.y;
     const scale = BABYLON.Scalar.Lerp(0.88, 0.56, progress) * (0.9 + random() * 0.2);
     const name = `dreamy-route-tree-${index}`;
     const anchor = createInstanceGroup(scene, world, libraries[treeTypes[index % treeTypes.length]], name, {
@@ -439,7 +403,7 @@ function createRouteVegetation(scene, world, startPosition, route, libraries, ve
     const lateralDistance = (6 + random() * 21) * side;
     const x = frame.position.x + frame.lateral.x * lateralDistance;
     const z = frame.position.z + frame.lateral.z * lateralDistance;
-    const groundY = getRouteLandscapeHeight(x, z, startPosition, progress, Math.abs(lateralDistance) / 36);
+    const groundY = surface.at(x, z).point.y;
     const [libraryName, kind] = undergrowthTypes[index % undergrowthTypes.length];
     const scale = BABYLON.Scalar.Lerp(0.92, 0.62, progress) * (0.88 + random() * 0.2);
     const name = `dreamy-route-undergrowth-${index}`;
@@ -458,7 +422,7 @@ function createRouteVegetation(scene, world, startPosition, route, libraries, ve
   return exclusions;
 }
 
-function createRouteGrass(scene, world, startPosition, route, libraries, exclusions) {
+function createRouteGrass(scene, world, startPosition, route, libraries, exclusions, surface, meadowExclusions) {
   const source = libraries.Grass_Common_Short.meshes[0];
   const grass = source.clone("dreamy-route-grass-thin-instances", world, true);
   // Thin-instance matrix buffers live on the mesh geometry. Detach this tiny
@@ -475,16 +439,30 @@ function createRouteGrass(scene, world, startPosition, route, libraries, exclusi
   grass.metadata = { ...(grass.metadata ?? {}), routeLandscape: true, lod: "thin-instance" };
 
   const random = createRandom(96113);
-  const matrices = new Float32Array(ROUTE_GRASS_COUNT * 16);
-  const assetBottom = source.getBoundingInfo().boundingBox.minimum.y;
+  const count = ROUTE_GRASS_COUNT + REAR_MEADOW_GRASS_COUNT;
+  const matrices = new Float32Array(count * 16);
+  const assetBottom = getGrassAssetBottom(source);
   const scaling = new BABYLON.Vector3();
   const position = new BABYLON.Vector3();
   const rotation = new BABYLON.Quaternion();
   const matrix = BABYLON.Matrix.Identity();
 
-  for (let index = 0; index < ROUTE_GRASS_COUNT; index += 1) {
+  for (let index = 0; index < count; index += 1) {
     let point = null;
     for (let attempt = 0; attempt < 48 && !point; attempt += 1) {
+      if (index >= ROUTE_GRASS_COUNT) {
+        // Most added grass is behind/alongside the new start; only a sparse
+        // outer population extends farther back. The house/route lie ahead.
+        const nearStart = index < ROUTE_GRASS_COUNT + 12000;
+        const offset = randomPoint(random, nearStart ? 12 : 52, nearStart ? 52 : 120);
+        const x = startPosition.x + offset.x;
+        const z = startPosition.z - Math.abs(offset.z) - 10;
+        const hit = surface.at(x, z);
+        if (hit && !isInsideGrassExclusion(x, z, meadowExclusions)) {
+          point = { x, z, progress: nearStart ? 0 : 1, hit };
+        }
+        continue;
+      }
       const progress = 0.045 + random() * 0.94;
       const frame = routeLandscapeFrame(route, progress * route.length);
       const tunnelGap = getTunnelDiameter(progress * TUNNEL_DURATION) * 0.5 + 1.05;
@@ -493,29 +471,15 @@ function createRouteGrass(scene, world, startPosition, route, libraries, exclusi
       const lateralDistance = BABYLON.Scalar.Lerp(tunnelGap, outer, Math.sqrt(random())) * side;
       const x = frame.position.x + frame.lateral.x * lateralDistance;
       const z = frame.position.z + frame.lateral.z * lateralDistance;
-      if (!exclusions.some((zone) => Math.hypot(x - zone.x, z - zone.z) < zone.radius)) {
-        point = { x, z, progress, edgeRatio: Math.abs(lateralDistance) / outer };
+      if (!exclusions.some((zone) => Math.hypot(x - zone.x, z - zone.z) < zone.radius)
+        && !isInsideGrassExclusion(x, z, meadowExclusions)) {
+        const hit = surface.at(x, z);
+        if (hit) point = { x, z, progress, hit };
       }
     }
-    if (!point) {
-      const progress = 0.1 + index / ROUTE_GRASS_COUNT * 0.84;
-      const frame = routeLandscapeFrame(route, progress * route.length);
-      const lateralDistance = (8 + (index % 19)) * (index % 2 === 0 ? -1 : 1);
-      point = {
-        x: frame.position.x + frame.lateral.x * lateralDistance,
-        z: frame.position.z + frame.lateral.z * lateralDistance,
-        progress,
-        edgeRatio: Math.abs(lateralDistance) / 31,
-      };
-    }
+    if (!point) throw new Error("Unable to place extension grass on a valid meadow triangle.");
     const scale = BABYLON.Scalar.Lerp(0.145, 0.1, point.progress) * (0.88 + random() * 0.22);
-    const groundY = getRouteLandscapeHeight(
-      point.x,
-      point.z,
-      startPosition,
-      point.progress,
-      point.edgeRatio,
-    );
+    const groundY = point.hit.point.y;
     scaling.setAll(scale);
     position.set(point.x, groundY - assetBottom * scale + GRASS_GROUND_OFFSET, point.z);
     BABYLON.Quaternion.RotationYawPitchRollToRef(random() * Math.PI * 2, 0, 0, rotation);
@@ -525,7 +489,7 @@ function createRouteGrass(scene, world, startPosition, route, libraries, exclusi
 
   grass.thinInstanceSetBuffer("matrix", matrices, 16, true);
   grass.thinInstanceRefreshBoundingInfo(true);
-  return { mesh: grass, count: ROUTE_GRASS_COUNT };
+  return { mesh: grass, count };
 }
 
 function createRouteHills(world, startPosition, route, source) {
@@ -923,13 +887,24 @@ function createInstanceGroup(scene, world, library, name, placement, startPositi
   return anchor;
 }
 
+function getGrassAssetBottom(mesh) {
+  // Thin-instance bounding boxes encompass the entire field after refresh;
+  // only the untouched source vertices describe the individual blade's pivot.
+  const positions = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+  let bottom = Infinity;
+  for (let index = 1; index < positions.length; index += 3) {
+    bottom = Math.min(bottom, positions[index]);
+  }
+  return bottom;
+}
+
 function createDenseGrassField(library, meadow, startPosition, random, zones, scaleRange, exclusions) {
   const mesh = library.meshes[0];
   // The asset's origin sits slightly above its lowest vertices.  Use its real
   // local bound, rather than a guessed offset, so every instance meets the
-  // same height function that generated the meadow beneath it.
-  const assetBottom = mesh.getBoundingInfo().boundingBox.minimum.y;
-  const sampler = createMeadowSurfaceSampler(meadow);
+  // actual triangle surface of the meadow beneath it.
+  const assetBottom = getGrassAssetBottom(mesh);
+  const sampler = createMeadowSurfaceSampler(meadow, startPosition, MEADOW_RADIUS * 1.04);
   return createThinInstanceField(mesh, sampler, startPosition, random, zones, scaleRange, assetBottom, exclusions);
 }
 
@@ -1109,7 +1084,7 @@ function randomPoint(random, inner, outer) {
   return { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
 }
 
-function createMeadowSurfaceSampler(meadow) {
+function createMeadowSurfaceSampler(meadow, sampleCenter = null, sampleRadius = Infinity) {
   const positions = meadow.getVerticesData(BABYLON.VertexBuffer.PositionKind);
   const indices = meadow.getIndices();
   if (!positions || !indices) {
@@ -1119,6 +1094,9 @@ function createMeadowSurfaceSampler(meadow) {
   meadow.computeWorldMatrix(true);
   const worldMatrix = meadow.getWorldMatrix();
   const triangles = [];
+  const cells = new Map();
+  const broadTriangles = [];
+  const cellSize = 8;
   let totalArea = 0;
   for (let index = 0; index < indices.length; index += 3) {
     const first = readWorldVertex(positions, indices[index], worldMatrix);
@@ -1132,14 +1110,56 @@ function createMeadowSurfaceSampler(meadow) {
     // physical upward surface, so orient the sampled normal accordingly.
     if (normal.y < 0) normal.scaleInPlace(-1);
     if (normal.y < MIN_GRASS_GROUND_NORMAL_Y) continue;
+    const triangle = { first, second, third, normal };
+    const minX = Math.floor(Math.min(first.x, second.x, third.x) / cellSize);
+    const maxX = Math.floor(Math.max(first.x, second.x, third.x) / cellSize);
+    const minZ = Math.floor(Math.min(first.z, second.z, third.z) / cellSize);
+    const maxZ = Math.floor(Math.max(first.z, second.z, third.z) / cellSize);
+    // Coarse horizon triangles stay in a small fallback list instead of
+    // filling thousands of spatial cells. All lookup work is load-time only.
+    if ((maxX - minX + 1) * (maxZ - minZ + 1) > 64) {
+      broadTriangles.push(triangle);
+    } else {
+      for (let x = minX; x <= maxX; x += 1) {
+        for (let z = minZ; z <= maxZ; z += 1) {
+          const key = `${x},${z}`;
+          if (!cells.has(key)) cells.set(key, []);
+          cells.get(key).push(triangle);
+        }
+      }
+    }
+    // Don't sample the huge distant ground when distributing the original
+    // dense grass near the visitor. This preserves cheap rejection sampling.
+    if (sampleCenter && [first, second, third].every((vertex) => (
+      Math.hypot(vertex.x - sampleCenter.x, vertex.z - sampleCenter.z) > sampleRadius
+    ))) continue;
     totalArea += doubleArea * 0.5;
-    triangles.push({ first, second, third, normal, cumulativeArea: totalArea });
+    triangle.cumulativeArea = totalArea;
+    triangles.push(triangle);
   }
   if (triangles.length === 0) {
     throw new Error("The grass receiver has no valid upward-facing triangles.");
   }
 
   return {
+    at(x, z) {
+      const candidates = cells.get(`${Math.floor(x / cellSize)},${Math.floor(z / cellSize)}`) ?? [];
+      for (const group of [candidates, broadTriangles]) {
+        for (const { first, second, third, normal } of group) {
+          const denominator = (second.z - third.z) * (first.x - third.x)
+            + (third.x - second.x) * (first.z - third.z);
+          if (Math.abs(denominator) < 1e-10) continue;
+          const a = ((second.z - third.z) * (x - third.x)
+            + (third.x - second.x) * (z - third.z)) / denominator;
+          const b = ((third.z - first.z) * (x - third.x)
+            + (first.x - third.x) * (z - third.z)) / denominator;
+          const c = 1 - a - b;
+          if (Math.min(a, b, c) < -1e-7) continue;
+          return { point: new BABYLON.Vector3(x, first.y * a + second.y * b + third.y * c, z), normal };
+        }
+      }
+      return null;
+    },
     sample(random) {
       const targetArea = random() * totalArea;
       let low = 0;
