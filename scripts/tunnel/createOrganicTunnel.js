@@ -22,6 +22,9 @@ const WHITE_ROOM_SPILL_MAX_INTENSITY = 4.5;
 const WHITE_ROOM_SPILL_RANGE = 52;
 const ENTRY_BACKLIGHT_MAX_INTENSITY = 12;
 const ENTRY_BACKLIGHT_RANGE = 34;
+const TUNNEL_MEMBRANE_ALPHA_START = 0.18;
+const TUNNEL_MEMBRANE_ALPHA_MID = 0.28;
+const TUNNEL_MEMBRANE_ALPHA_END = 0.37;
 // Existing morph fields remain deliberately uneven so they do not read as one
 // synchronized tube pulse. Values are moderate and still safety-clamped.
 const WALL_MOTION_AMPLITUDES = [1.1, 1.2, 1.02, 1.16, 1.07, 1.13];
@@ -94,6 +97,7 @@ export function createOrganicTunnel(scene, options) {
       activeTime = Math.min(activeTime + delta, TUNNEL_DURATION);
     }
     wallDeformation.update(activeTime);
+    updateTunnelMembraneMaterial(material, activeTime);
     updateTunnelLights(lights, route, activeTime, impulse);
     impulse = Math.max(0, impulse - delta * 2.9);
   });
@@ -115,6 +119,7 @@ export function createOrganicTunnel(scene, options) {
       // that motion continuous when the travel clock begins instead of
       // resetting the deformation phase to zero on the crossing frame.
       activeTime = Math.max(activeTime, BABYLON.Scalar.Clamp(tunnelTime, 0, TUNNEL_DURATION));
+      updateTunnelMembraneMaterial(material, activeTime);
       const look = getTunnelLook(activeTime);
       if (activeTime >= nextImpulseAt) {
         impulse = 1;
@@ -130,6 +135,7 @@ export function createOrganicTunnel(scene, options) {
       if (!active) {
         activeTime = 0;
         impulse = 0;
+        updateTunnelMembraneMaterial(material, 0);
         updateTunnelLights(lights, route, 0, 0);
       }
     },
@@ -140,6 +146,7 @@ export function createOrganicTunnel(scene, options) {
       nextImpulseAt = 12.7;
       previousFrameTime = performance.now();
       wallDeformation.update(0);
+      updateTunnelMembraneMaterial(material, 0);
       updateTunnelLights(lights, route, 0, 0);
     },
     dispose() {
@@ -542,27 +549,43 @@ function createTunnelMaterial(scene) {
   // around the shell. A non-integer multiplier keeps the 1K detail dense
   // without making its source tile readable through the long tunnel.
   const textureRepeat = 1.9;
-  material.albedoTexture = createTexture(scene, `${textureRoot}/SkinAlien_19_1k_albedo.png`, textureRepeat, true);
+  // The V3 shell is a translucent membrane, not a textured solid. Keep only
+  // the authored micro-normal detail so grazing light can still describe wet
+  // folds without reintroducing the old opaque skin pattern.
   material.bumpTexture = createTexture(scene, `${textureRoot}/SkinAlien_19_1k_normal.png`, textureRepeat, false);
-  material.bumpTexture.level = 0.36;
-  // Babylon reads a grayscale roughness map through the green channel of its
-  // metallic texture slot. Metallic contribution stays explicitly disabled.
-  material.metallicTexture = createTexture(scene, `${textureRoot}/SkinAlien_19_1k_roughness.png`, textureRepeat, false);
-  material.ambientTexture = createTexture(scene, `${textureRoot}/SkinAlien_19_1k_ambientOcclusion.png`, textureRepeat, false);
-  material.ambientTexture.level = 0.1;
-  material.useAmbientInGrayScale = true;
-  material.useRoughnessFromMetallicTextureGreen = true;
-  material.useMetallnessFromMetallicTextureBlue = false;
-  material.useVertexColors = true;
-  // The supplied albedo is intentionally subdued so the tunnel keeps its
-  // established dark, abstract character rather than reading as saturated skin.
-  material.albedoColor = BABYLON.Color3.FromHexString("#6d7780");
+  material.bumpTexture.level = 0.24;
+  material.useVertexColors = false;
+  material.albedoColor = BABYLON.Color3.FromHexString("#c4c7c5");
   material.metallic = 0;
-  material.roughness = 0.82;
-  material.environmentIntensity = 0.08;
-  material.specularIntensity = 0.1;
-  material.backFaceCulling = false;
+  material.roughness = 0.46;
+  material.environmentIntensity = 0.38;
+  material.specularIntensity = 0.72;
+  material.emissiveColor = BABYLON.Color3.FromHexString("#242827");
+  material.indexOfRefraction = 1.34;
+  material.alpha = TUNNEL_MEMBRANE_ALPHA_START;
+  material.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+  // A depth pre-pass would occlude the opaque idyll before this transparent
+  // shell is blended. Render back and front faces separately instead, keeping
+  // the landscape in the color buffer while limiting unordered self-overdraw.
+  material.needDepthPrePass = false;
+  material.forceDepthWrite = false;
+  material.backFaceCulling = true;
+  material.twoSidedLighting = true;
+  material.separateCullingPass = true;
+  material.clearCoat.isEnabled = true;
+  material.clearCoat.intensity = 0.34;
+  material.clearCoat.roughness = 0.3;
   return material;
+}
+
+function updateTunnelMembraneMaterial(material, time) {
+  const firstHalf = smoothstep(time / (TUNNEL_DURATION * 0.5));
+  const secondHalf = smoothstep((time - TUNNEL_DURATION * 0.5) / (TUNNEL_DURATION * 0.5));
+  material.alpha = BABYLON.Scalar.Lerp(
+    BABYLON.Scalar.Lerp(TUNNEL_MEMBRANE_ALPHA_START, TUNNEL_MEMBRANE_ALPHA_MID, firstHalf),
+    TUNNEL_MEMBRANE_ALPHA_END,
+    secondHalf,
+  );
 }
 
 function createTunnelLights(scene, meshes, route) {

@@ -1740,20 +1740,17 @@ function createTunnelWorldGroup(scene, options) {
       // cleanup may never leave a frame without the real tunnel renderable.
       options.tunnel.setEnabled(true);
       options.tunnel.mesh.visibility = originalVisibility.get(options.tunnel.mesh);
-      // The idyll's sky mesh is disabled below, but Babylon still clears the
-      // frame with the idyll's pale blue clear color. During the Rift stencil
-      // handoff that background can briefly be exposed through a gap, which
-      // reads as an idyll flash even with every idyll mesh disabled.
+      // Retain the established dark fallback behind the rendered world. The
+      // V3 experiment intentionally keeps the actual idyll renderable after
+      // crossing so it can be seen through the translucent tunnel membrane.
       scene.clearColor = new BABYLON.Color4(0.006, 0.009, 0.014, 1);
       setEntranceEnabled(false);
       entranceMeshes.forEach((mesh) => {
         mesh.visibility = originalVisibility.get(mesh);
       });
-      // The rupture has closed behind the visitor: the idyll is no longer a
-      // renderable dimension from inside the tunnel, including through the
-      // later White-Room sightline.
-      options.idyllWorldMeshes.forEach((mesh) => mesh.setEnabled(false));
-      options.onIdyllHidden?.();
+      // Do not blanket-disable the idyll here. The active sky, meadow, hills,
+      // trees and house remain visible beyond the transparent shell. Rift
+      // teardown and its stencil restoration are otherwise unchanged.
     },
     reset() {
       allMeshes.forEach((mesh) => {
