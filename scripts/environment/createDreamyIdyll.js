@@ -1,4 +1,12 @@
+import { TUNNEL_DURATION, getTunnelDiameter } from "../tunnel/tunnelConfig.js";
+
 const MEADOW_RADIUS = 55;
+const ROUTE_LANDSCAPE_EXTRA_LENGTH = 18;
+const ROUTE_LANDSCAPE_HALF_WIDTH_START = 36;
+const ROUTE_LANDSCAPE_HALF_WIDTH_END = 30;
+const ROUTE_LANDSCAPE_SECTIONS = 48;
+const ROUTE_LANDSCAPE_LATERAL_STEPS = 20;
+const ROUTE_GRASS_COUNT = 9000;
 const DENSE_GRASS_ZONES = [
   { count: 35000, innerRadius: 1.8, outerRadius: 22 },
   { count: 25000, innerRadius: 22, outerRadius: 42 },
@@ -91,6 +99,7 @@ export async function createDreamyIdyll(scene, startPosition) {
     vegetation.entries,
   );
   const atmosphere = createAtmosphere(scene, world, startPosition, vegetation.swayAnchors, sky);
+  let routeExtension = null;
 
   return {
     world,
@@ -107,6 +116,21 @@ export async function createDreamyIdyll(scene, startPosition) {
       startPosition.z,
     ),
     meadowRadius: MEADOW_RADIUS,
+    extendAlongTunnelRoute(route) {
+      if (!routeExtension) {
+        routeExtension = createRouteLandscapeExtension(
+          scene,
+          world,
+          startPosition,
+          route,
+          meadow,
+          mountains[0],
+          libraries,
+          vegetation,
+        );
+      }
+      return routeExtension;
+    },
     excludeFromTunnel(tunnelMesh) {
       lights.forEach((light) => light.excludedMeshes.push(tunnelMesh));
     },
@@ -289,6 +313,291 @@ function createRollingMeadow(scene, world, startPosition) {
   meadow.isPickable = false;
   meadow.receiveShadows = true;
   return meadow;
+}
+
+function createRouteLandscapeExtension(
+  scene,
+  world,
+  startPosition,
+  route,
+  meadow,
+  hillSource,
+  libraries,
+  vegetation,
+) {
+  const terrain = [createRouteMeadowStrip(scene, world, startPosition, route, meadow.material)];
+  const propExclusions = createRouteVegetation(
+    scene,
+    world,
+    startPosition,
+    route,
+    libraries,
+    vegetation,
+  );
+  const grass = createRouteGrass(scene, world, startPosition, route, libraries, propExclusions);
+  const hills = createRouteHills(world, startPosition, route, hillSource);
+  return {
+    terrain,
+    grass,
+    hills,
+    distanceCovered: route.length + ROUTE_LANDSCAPE_EXTRA_LENGTH,
+  };
+}
+
+function createRouteMeadowStrip(scene, world, startPosition, route, material) {
+  const positions = [];
+  const normals = [];
+  const colors = [];
+  const indices = [];
+  const totalDistance = route.length + ROUTE_LANDSCAPE_EXTRA_LENGTH;
+
+  for (let section = 0; section <= ROUTE_LANDSCAPE_SECTIONS; section += 1) {
+    const progress = section / ROUTE_LANDSCAPE_SECTIONS;
+    const distance = progress * totalDistance;
+    const frame = routeLandscapeFrame(route, distance);
+    const outerOffset = BABYLON.Scalar.Lerp(
+      ROUTE_LANDSCAPE_HALF_WIDTH_START,
+      ROUTE_LANDSCAPE_HALF_WIDTH_END,
+      progress,
+    );
+
+    for (let lateralStep = 0; lateralStep <= ROUTE_LANDSCAPE_LATERAL_STEPS; lateralStep += 1) {
+      const lateralRatio = lateralStep / ROUTE_LANDSCAPE_LATERAL_STEPS * 2 - 1;
+      const edgeRatio = Math.abs(lateralRatio);
+      const offset = outerOffset * lateralRatio;
+      const x = frame.position.x + frame.lateral.x * offset;
+      const z = frame.position.z + frame.lateral.z * offset;
+      const y = getRouteLandscapeHeight(x, z, startPosition, progress, edgeRatio);
+      const shade = 0.95 + Math.sin(x * 0.19 + z * 0.13) * 0.035;
+      const distanceMute = BABYLON.Scalar.Lerp(1, 0.82, smoothstep(progress));
+      positions.push(x, y, z);
+      normals.push(0, 1, 0);
+      colors.push(
+        0.36 * shade * distanceMute,
+        0.58 * shade * distanceMute,
+        0.28 * shade * distanceMute,
+        1,
+      );
+    }
+  }
+
+  const stride = ROUTE_LANDSCAPE_LATERAL_STEPS + 1;
+  for (let section = 0; section < ROUTE_LANDSCAPE_SECTIONS; section += 1) {
+    for (let lateralStep = 0; lateralStep < ROUTE_LANDSCAPE_LATERAL_STEPS; lateralStep += 1) {
+      const current = section * stride + lateralStep;
+      const next = current + stride;
+      indices.push(current, next, next + 1, current, next + 1, current + 1);
+    }
+  }
+
+  BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+  const mesh = new BABYLON.Mesh("dreamy-route-meadow-strip", scene);
+  const vertexData = new BABYLON.VertexData();
+  vertexData.positions = positions;
+  vertexData.normals = normals;
+  vertexData.colors = colors;
+  vertexData.indices = indices;
+  vertexData.applyToMesh(mesh);
+  mesh.material = material;
+  mesh.parent = world;
+  mesh.isPickable = false;
+  mesh.receiveShadows = false;
+  mesh.metadata = { ...(mesh.metadata ?? {}), grassReceiver: true, routeLandscape: true };
+  return mesh;
+}
+
+function createRouteVegetation(scene, world, startPosition, route, libraries, vegetation) {
+  const random = createRandom(48271);
+  const exclusions = [];
+  const treeTypes = ["CommonTree_1", "CommonTree_3", "CommonTree_2", "CommonTree_4"];
+  const undergrowthTypes = [
+    ["Bush_Common", "bushes"],
+    ["Bush_Common_Flowers", "bushes"],
+    ["Fern_1", "plants"],
+    ["Flower_3_Group", "flowers"],
+  ];
+
+  for (let index = 0; index < 28; index += 1) {
+    const progress = 0.07 + index / 27 * 0.89;
+    const frame = routeLandscapeFrame(route, progress * route.length);
+    const side = index % 2 === 0 ? -1 : 1;
+    const lateralDistance = (8 + random() * 17) * side;
+    const x = frame.position.x + frame.lateral.x * lateralDistance;
+    const z = frame.position.z + frame.lateral.z * lateralDistance;
+    const groundY = getRouteLandscapeHeight(x, z, startPosition, progress, Math.abs(lateralDistance) / 36);
+    const scale = BABYLON.Scalar.Lerp(0.88, 0.56, progress) * (0.9 + random() * 0.2);
+    const name = `dreamy-route-tree-${index}`;
+    const anchor = createInstanceGroup(scene, world, libraries[treeTypes[index % treeTypes.length]], name, {
+      x,
+      z,
+      groundY,
+      scale,
+      rotation: random() * Math.PI * 2,
+    }, startPosition);
+    vegetation.entries.push({ anchor, prefix: name, kind: "trees" });
+    vegetation.counts.trees += 1;
+    exclusions.push({ x, z, radius: 1.25 * scale + 0.42 });
+  }
+
+  for (let index = 0; index < 42; index += 1) {
+    const progress = 0.08 + random() * 0.87;
+    const frame = routeLandscapeFrame(route, progress * route.length);
+    const side = random() < 0.5 ? -1 : 1;
+    const lateralDistance = (6 + random() * 21) * side;
+    const x = frame.position.x + frame.lateral.x * lateralDistance;
+    const z = frame.position.z + frame.lateral.z * lateralDistance;
+    const groundY = getRouteLandscapeHeight(x, z, startPosition, progress, Math.abs(lateralDistance) / 36);
+    const [libraryName, kind] = undergrowthTypes[index % undergrowthTypes.length];
+    const scale = BABYLON.Scalar.Lerp(0.92, 0.62, progress) * (0.88 + random() * 0.2);
+    const name = `dreamy-route-undergrowth-${index}`;
+    const anchor = createInstanceGroup(scene, world, libraries[libraryName], name, {
+      x,
+      z,
+      groundY,
+      scale,
+      rotation: random() * Math.PI * 2,
+    }, startPosition);
+    vegetation.entries.push({ anchor, prefix: name, kind });
+    vegetation.counts[kind] += 1;
+    vegetation.swayAnchors.push({ anchor, phase: random() * Math.PI * 2, kind });
+    exclusions.push({ x, z, radius: 0.55 * scale + 0.18 });
+  }
+  return exclusions;
+}
+
+function createRouteGrass(scene, world, startPosition, route, libraries, exclusions) {
+  const source = libraries.Grass_Common_Short.meshes[0];
+  const grass = source.clone("dreamy-route-grass-thin-instances", world, true);
+  // Thin-instance matrix buffers live on the mesh geometry. Detach this tiny
+  // grass geometry before assigning the route matrices so the original
+  // 75,000-instance meadow buffer remains untouched.
+  grass.makeGeometryUnique();
+  grass.parent = world;
+  grass.position.set(0, 0, 0);
+  grass.rotation.set(0, 0, 0);
+  grass.scaling.setAll(1);
+  grass.isVisible = true;
+  grass.isPickable = false;
+  grass.receiveShadows = false;
+  grass.metadata = { ...(grass.metadata ?? {}), routeLandscape: true, lod: "thin-instance" };
+
+  const random = createRandom(96113);
+  const matrices = new Float32Array(ROUTE_GRASS_COUNT * 16);
+  const assetBottom = source.getBoundingInfo().boundingBox.minimum.y;
+  const scaling = new BABYLON.Vector3();
+  const position = new BABYLON.Vector3();
+  const rotation = new BABYLON.Quaternion();
+  const matrix = BABYLON.Matrix.Identity();
+
+  for (let index = 0; index < ROUTE_GRASS_COUNT; index += 1) {
+    let point = null;
+    for (let attempt = 0; attempt < 48 && !point; attempt += 1) {
+      const progress = 0.045 + random() * 0.94;
+      const frame = routeLandscapeFrame(route, progress * route.length);
+      const tunnelGap = getTunnelDiameter(progress * TUNNEL_DURATION) * 0.5 + 1.05;
+      const side = random() < 0.5 ? -1 : 1;
+      const outer = BABYLON.Scalar.Lerp(31, 25, progress);
+      const lateralDistance = BABYLON.Scalar.Lerp(tunnelGap, outer, Math.sqrt(random())) * side;
+      const x = frame.position.x + frame.lateral.x * lateralDistance;
+      const z = frame.position.z + frame.lateral.z * lateralDistance;
+      if (!exclusions.some((zone) => Math.hypot(x - zone.x, z - zone.z) < zone.radius)) {
+        point = { x, z, progress, edgeRatio: Math.abs(lateralDistance) / outer };
+      }
+    }
+    if (!point) {
+      const progress = 0.1 + index / ROUTE_GRASS_COUNT * 0.84;
+      const frame = routeLandscapeFrame(route, progress * route.length);
+      const lateralDistance = (8 + (index % 19)) * (index % 2 === 0 ? -1 : 1);
+      point = {
+        x: frame.position.x + frame.lateral.x * lateralDistance,
+        z: frame.position.z + frame.lateral.z * lateralDistance,
+        progress,
+        edgeRatio: Math.abs(lateralDistance) / 31,
+      };
+    }
+    const scale = BABYLON.Scalar.Lerp(0.145, 0.1, point.progress) * (0.88 + random() * 0.22);
+    const groundY = getRouteLandscapeHeight(
+      point.x,
+      point.z,
+      startPosition,
+      point.progress,
+      point.edgeRatio,
+    );
+    scaling.setAll(scale);
+    position.set(point.x, groundY - assetBottom * scale + GRASS_GROUND_OFFSET, point.z);
+    BABYLON.Quaternion.RotationYawPitchRollToRef(random() * Math.PI * 2, 0, 0, rotation);
+    BABYLON.Matrix.ComposeToRef(scaling, rotation, position, matrix);
+    matrix.copyToArray(matrices, index * 16);
+  }
+
+  grass.thinInstanceSetBuffer("matrix", matrices, 16, true);
+  grass.thinInstanceRefreshBoundingInfo(true);
+  return { mesh: grass, count: ROUTE_GRASS_COUNT };
+}
+
+function createRouteHills(world, startPosition, route, source) {
+  const layout = [];
+  for (let band = 0; band < 8; band += 1) {
+    const progress = 0.12 + band * 0.11;
+    layout.push(
+      [progress, -1, 29 + band % 3 * 2, 17 + band % 2 * 2, 8.5 + band % 3, 13.5, -0.62 + band * 0.24],
+      [progress + 0.045, 1, 30 + (band + 1) % 3 * 2, 16 + (band + 1) % 2 * 2.5, 8 + (band + 1) % 3, 13, 0.74 - band * 0.19],
+    );
+  }
+  layout.push(
+    [0.28, -1, 36, 28, 13, 20, -0.45],
+    [0.4, 1, 38, 31, 15, 22, 0.72],
+    [0.57, -1, 40, 25, 12, 18, 1.05],
+    [0.69, 1, 36, 29, 14, 21, -0.84],
+    [0.84, -1, 38, 27, 13, 19, 0.38],
+    [0.94, 1, 35, 30, 14, 22, -1.16],
+  );
+  return layout.map(([progress, side, offset, scaleX, scaleY, scaleZ, yaw], index) => {
+    const frame = routeLandscapeFrame(route, progress * route.length);
+    const x = frame.position.x + frame.lateral.x * offset * side;
+    const z = frame.position.z + frame.lateral.z * offset * side;
+    const hill = source.createInstance(`dreamy-route-hill-${index}`);
+    hill.parent = world;
+    hill.position.set(
+      x,
+      getRouteLandscapeHeight(x, z, startPosition, progress, 1) + scaleY * 0.512 - 1.2,
+      z,
+    );
+    hill.scaling.set(scaleX, scaleY, scaleZ);
+    hill.rotation.y = yaw;
+    hill.isPickable = false;
+    hill.receiveShadows = false;
+    return hill;
+  });
+}
+
+function routeLandscapeFrame(route, distance) {
+  const clampedDistance = Math.min(distance, route.length);
+  const progress = route.progressAtDistance(clampedDistance);
+  const position = route.positionAt(progress);
+  const tangent = route.tangentAt(progress);
+  tangent.y = 0;
+  tangent.normalize();
+  if (distance > route.length) {
+    position.addInPlace(tangent.scale(distance - route.length));
+  }
+  const lateral = new BABYLON.Vector3(tangent.z, 0, -tangent.x).normalize();
+  return { position, tangent, lateral };
+}
+
+function getRouteLandscapeHeight(x, z, startPosition, progress, edgeRatio) {
+  const originalBlend = 1 - smoothstep(progress / 0.24);
+  const originalHeight = getMeadowHeight(x, z, startPosition);
+  const routeRoll = Math.sin(x * 0.115 + z * 0.071) * 0.27
+    + Math.cos(z * 0.092 - x * 0.038) * 0.18
+    + Math.sin((x - z) * 0.064) * 0.09;
+  const edgeLift = smoothstep((edgeRatio - 0.68) / 0.32) * 1.1;
+  return BABYLON.Scalar.Lerp(routeRoll, originalHeight, originalBlend) + edgeLift;
+}
+
+function smoothstep(value) {
+  const clamped = BABYLON.Scalar.Clamp(value, 0, 1);
+  return clamped * clamped * (3 - 2 * clamped);
 }
 
 function getMeadowHeight(x, z, startPosition) {
@@ -606,7 +915,11 @@ function placeNature(scene, world, libraries, startPosition, house, meadow) {
 function createInstanceGroup(scene, world, library, name, placement, startPosition) {
   const anchor = new BABYLON.TransformNode(`${name}-anchor`, scene);
   anchor.parent = world;
-  anchor.position.set(placement.x, getMeadowHeight(placement.x, placement.z, startPosition) + (placement.yOffset ?? 0), placement.z);
+  anchor.position.set(
+    placement.x,
+    (placement.groundY ?? getMeadowHeight(placement.x, placement.z, startPosition)) + (placement.yOffset ?? 0),
+    placement.z,
+  );
   anchor.rotation.y = placement.rotation;
   anchor.scaling.setAll(placement.scale);
   library.meshes.forEach((mesh, index) => {

@@ -38,6 +38,9 @@ export async function createIdyllScene(
     grassMaterial: environment.materials.terrain,
     getGroundHeight: environment.terrain.getGroundHeight,
   });
+  // The V3 tunnel is a transparent membrane. Extend the existing idyll along
+  // its real route before the transition snapshots the world mesh set.
+  dreamyIdyll.extendAlongTunnelRoute(tunnel.route);
   clearTunnelTerrain(
     [
       environment.terrain.terrain,
