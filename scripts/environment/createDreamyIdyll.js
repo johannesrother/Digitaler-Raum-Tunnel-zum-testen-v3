@@ -1,6 +1,7 @@
 import { TUNNEL_DURATION, getTunnelDiameter } from "../tunnel/tunnelConfig.js";
 
-const MEADOW_RADIUS = 55;
+const MEADOW_RADIUS = 62;
+const CAMERA_START_RETREAT = 12;
 const ROUTE_LANDSCAPE_EXTRA_LENGTH = 18;
 const ROUTE_LANDSCAPE_HALF_WIDTH_START = 36;
 const ROUTE_LANDSCAPE_HALF_WIDTH_END = 30;
@@ -55,16 +56,11 @@ const EMBEDDED_GRASS_PATCHES_PER_CLUSTER = 4;
 const EMBEDDED_GRASS_PATCH_RADIUS = 1.15;
 
 const HORIZON_HILL_LAYOUT = [
-  { angle: 0.08, radius: 134, scale: [31, 15, 22], yaw: -0.64 },
-  { angle: 0.68, radius: 142, scale: [26, 13, 18], yaw: 0.32 },
-  { angle: 1.32, radius: 130, scale: [36, 18, 24], yaw: 1.05 },
-  { angle: 1.96, radius: 146, scale: [28, 14, 20], yaw: -1.12 },
-  { angle: 2.6, radius: 136, scale: [34, 17, 23], yaw: 0.7 },
-  { angle: 3.2, radius: 144, scale: [25, 12, 18], yaw: -0.28 },
-  { angle: 3.78, radius: 132, scale: [38, 19, 25], yaw: 1.18 },
-  { angle: 4.38, radius: 148, scale: [27, 13, 19], yaw: -0.9 },
-  { angle: 5.0, radius: 138, scale: [33, 16, 22], yaw: 0.46 },
-  { angle: 5.64, radius: 145, scale: [29, 14, 20], yaw: -1.3 },
+  { angle: 0.08, radius: 142, scale: [28, 13, 20], yaw: -0.64 },
+  { angle: 1.32, radius: 138, scale: [31, 15, 22], yaw: 1.05 },
+  { angle: 2.6, radius: 146, scale: [29, 14, 20], yaw: 0.7 },
+  { angle: 3.78, radius: 140, scale: [32, 15, 22], yaw: 1.18 },
+  { angle: 5.0, radius: 144, scale: [28, 13, 20], yaw: 0.46 },
 ];
 
 /**
@@ -100,6 +96,7 @@ export async function createDreamyIdyll(scene, startPosition) {
   );
   const atmosphere = createAtmosphere(scene, world, startPosition, vegetation.swayAnchors, sky);
   let routeExtension = null;
+  const cameraStartPosition = createRetreatedCameraStart(startPosition, house.position);
 
   return {
     world,
@@ -110,11 +107,7 @@ export async function createDreamyIdyll(scene, startPosition) {
     lights,
     vegetation,
     buildGrass: vegetation.buildGrass,
-    startPosition: new BABYLON.Vector3(
-      startPosition.x,
-      getMeadowHeight(startPosition.x, startPosition.z, startPosition),
-      startPosition.z,
-    ),
+    startPosition: cameraStartPosition,
     meadowRadius: MEADOW_RADIUS,
     extendAlongTunnelRoute(route) {
       if (!routeExtension) {
@@ -536,22 +529,12 @@ function createRouteGrass(scene, world, startPosition, route, libraries, exclusi
 }
 
 function createRouteHills(world, startPosition, route, source) {
-  const layout = [];
-  for (let band = 0; band < 8; band += 1) {
-    const progress = 0.12 + band * 0.11;
-    layout.push(
-      [progress, -1, 29 + band % 3 * 2, 17 + band % 2 * 2, 8.5 + band % 3, 13.5, -0.62 + band * 0.24],
-      [progress + 0.045, 1, 30 + (band + 1) % 3 * 2, 16 + (band + 1) % 2 * 2.5, 8 + (band + 1) % 3, 13, 0.74 - band * 0.19],
-    );
-  }
-  layout.push(
-    [0.28, -1, 36, 28, 13, 20, -0.45],
-    [0.4, 1, 38, 31, 15, 22, 0.72],
-    [0.57, -1, 40, 25, 12, 18, 1.05],
-    [0.69, 1, 36, 29, 14, 21, -0.84],
-    [0.84, -1, 38, 27, 13, 19, 0.38],
-    [0.94, 1, 35, 30, 14, 22, -1.16],
-  );
+  const layout = [
+    [0.25, -1, 44, 22, 10, 16, -0.45],
+    [0.48, 1, 46, 24, 11, 17, 0.72],
+    [0.7, -1, 45, 21, 9.5, 15, 1.05],
+    [0.9, 1, 43, 23, 10.5, 17, -0.84],
+  ];
   return layout.map(([progress, side, offset, scaleX, scaleY, scaleZ, yaw], index) => {
     const frame = routeLandscapeFrame(route, progress * route.length);
     const x = frame.position.x + frame.lateral.x * offset * side;
@@ -588,11 +571,20 @@ function routeLandscapeFrame(route, distance) {
 function getRouteLandscapeHeight(x, z, startPosition, progress, edgeRatio) {
   const originalBlend = 1 - smoothstep(progress / 0.24);
   const originalHeight = getMeadowHeight(x, z, startPosition);
-  const routeRoll = Math.sin(x * 0.115 + z * 0.071) * 0.27
-    + Math.cos(z * 0.092 - x * 0.038) * 0.18
-    + Math.sin((x - z) * 0.064) * 0.09;
-  const edgeLift = smoothstep((edgeRatio - 0.68) / 0.32) * 1.1;
+  const routeRoll = Math.sin(x * 0.115 + z * 0.071) * 0.16
+    + Math.cos(z * 0.092 - x * 0.038) * 0.1
+    + Math.sin((x - z) * 0.064) * 0.05;
+  const edgeLift = smoothstep((edgeRatio - 0.68) / 0.32) * 0.55;
   return BABYLON.Scalar.Lerp(routeRoll, originalHeight, originalBlend) + edgeLift;
+}
+
+function createRetreatedCameraStart(startPosition, housePosition) {
+  const towardHouse = housePosition.subtract(startPosition);
+  towardHouse.y = 0;
+  towardHouse.normalize();
+  const cameraStart = startPosition.subtract(towardHouse.scale(CAMERA_START_RETREAT));
+  cameraStart.y = getMeadowHeight(cameraStart.x, cameraStart.z, startPosition);
+  return cameraStart;
 }
 
 function smoothstep(value) {
@@ -605,9 +597,9 @@ function getMeadowHeight(x, z, startPosition) {
   const dz = z - startPosition.z;
   const distance = Math.hypot(dx, dz);
   const fade = BABYLON.Scalar.Clamp((distance - 2.7) / 8, 0, 1);
-  const broad = Math.sin(dx * 0.16 + dz * 0.045) * 0.28 + Math.cos(dz * 0.13 - dx * 0.05) * 0.19;
-  const soft = Math.sin((dx - dz) * 0.11) * 0.08;
-  const edgeLift = Math.max(0, distance - 34) * 0.052;
+  const broad = Math.sin(dx * 0.16 + dz * 0.045) * 0.18 + Math.cos(dz * 0.13 - dx * 0.05) * 0.12;
+  const soft = Math.sin((dx - dz) * 0.11) * 0.045;
+  const edgeLift = Math.max(0, distance - 42) * 0.03;
   return (broad + soft) * fade + edgeLift;
 }
 
