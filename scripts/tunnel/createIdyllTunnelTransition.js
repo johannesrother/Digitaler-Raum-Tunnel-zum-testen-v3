@@ -140,6 +140,7 @@ export function createIdyllTunnelTransition(scene, options) {
         delta,
       );
       options.tunnel.update(tunnelTime);
+      options.onTunnelUpdate?.(tunnelTime);
       if (tunnelTime >= WHITE_PREVIEW_START) {
         options.whiteRoom.preview(smoothstep((tunnelTime - WHITE_PREVIEW_START) / (TUNNEL_DURATION - WHITE_PREVIEW_START)));
       }

@@ -1,6 +1,7 @@
 import { createDesktopCamera } from "../camera/createDesktopCamera.js";
 import { createIdyllEnvironment } from "../environment/createIdyllEnvironment.js";
 import { createDreamyIdyll } from "../environment/createDreamyIdyll.js";
+import { createIdyllDesaturation } from "../environment/createIdyllDesaturation.js";
 import { createOrganicTunnel } from "../tunnel/createOrganicTunnel.js";
 import { clearTunnelTerrain, removeIdyllObjectsFromTunnel } from "../tunnel/clearTunnelTerrain.js";
 import { createIdyllTunnelTransition } from "../tunnel/createIdyllTunnelTransition.js";
@@ -41,6 +42,7 @@ export async function createIdyllScene(
   // The V3 tunnel is a transparent membrane. Extend the existing idyll along
   // its real route before the transition snapshots the world mesh set.
   dreamyIdyll.extendAlongTunnelRoute(tunnel.route);
+  const idyllDesaturation = createIdyllDesaturation(dreamyIdyll.world);
   clearTunnelTerrain(
     [
       environment.terrain.terrain,
@@ -76,11 +78,13 @@ export async function createIdyllScene(
     whiteRoom,
     whiteRoomTone,
     onRiftOpening: () => riftSound.start(),
+    onTunnelUpdate: (tunnelTime) => idyllDesaturation.update(tunnelTime),
     onSuctionStart: () => {
       suctionSound.start();
       tunnelSound.fadeTo(0.28, 8);
     },
     onWhiteRoomEntry: () => {
+      idyllDesaturation.reset();
       onWhiteRoomEntry?.();
       tunnelSound.fadeOutAndStop(2);
       suctionSound.fadeOutAndStop(2);
@@ -92,6 +96,7 @@ export async function createIdyllScene(
     },
     onIdyllHidden: () => dreamyIdyll.hide(),
     onExperienceReset: () => {
+      idyllDesaturation.reset();
       idyllSound.stop();
       riftSound.stop();
       suctionSound.stop();
@@ -108,6 +113,7 @@ export async function createIdyllScene(
   scene.metadata = {
     environment,
     dreamyIdyll,
+    idyllDesaturation,
     desktopCamera,
     tunnel,
     transition,
