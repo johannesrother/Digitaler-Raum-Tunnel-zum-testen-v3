@@ -523,10 +523,14 @@ function createSpacetimeRift(scene, entrance, tunnelStart, tunnelMesh, idyllWorl
   fragmentMaterial.backFaceCulling = false;
   fragmentMaterial.disableLighting = true;
   const voidMaterial = new BABYLON.StandardMaterial("spacetime-rift-charcoal-void-material", scene);
-  voidMaterial.diffuseColor = BABYLON.Color3.FromHexString("#070a10");
-  voidMaterial.emissiveColor = BABYLON.Color3.FromHexString("#10151d");
+  // Visible membrane only: the separate aperture mask remains colourless.
+  voidMaterial.diffuseColor = BABYLON.Color3.FromHexString("#c4c7c5");
+  voidMaterial.emissiveColor = BABYLON.Color3.FromHexString("#242827");
   voidMaterial.specularColor = BABYLON.Color3.Black();
   voidMaterial.backFaceCulling = false;
+  voidMaterial.alpha = 0.22;
+  voidMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+  voidMaterial.disableDepthWrite = true;
   const maskMaterial = new BABYLON.StandardMaterial("spacetime-rift-stencil-mask-material", scene);
   maskMaterial.backFaceCulling = false;
   maskMaterial.disableColorWrite = true;
@@ -582,9 +586,9 @@ function createSpacetimeRift(scene, entrance, tunnelStart, tunnelMesh, idyllWorl
     maskEnabled = enabled;
     apertureMask.mesh.setEnabled(enabled);
     if (enabled) {
-      // Group 0 writes the aperture. Group 1 renders the idyll everywhere
-      // except that aperture; group 2 renders the one real tunnel only inside
-      // it. This prevents the meadow from leaking into the portal centre.
+      // Group 0 writes the colourless aperture. Group 1 renders the complete
+      // idyll; group 2 blends the real transparent tunnel only inside the
+      // aperture. The landscape remains the background for both membranes.
       scene.setRenderingAutoClearDepthStencil(1, false, false, false);
       scene.setRenderingAutoClearDepthStencil(2, false, false, false);
       tunnelMesh.renderingGroupId = 2;
@@ -613,7 +617,9 @@ function createSpacetimeRift(scene, entrance, tunnelStart, tunnelMesh, idyllWorl
         return;
       }
       material.stencil.enabled = true;
-      material.stencil.func = BABYLON.Engine.NOTEQUAL;
+      // Do not cut a hole in the background of the transparent Rift/tunnel.
+      // KEEP operations preserve the aperture written for the tunnel's EQUAL test.
+      material.stencil.func = BABYLON.Engine.ALWAYS;
       material.stencil.funcRef = 1;
       material.stencil.funcMask = 0xff;
       material.stencil.opStencilFail = BABYLON.Engine.KEEP;
@@ -699,7 +705,7 @@ function createSpacetimeRift(scene, entrance, tunnelStart, tunnelMesh, idyllWorl
         updateAperture(apertureMask, apertureScale, RIFT_APERTURE_MASK_DEPTH);
         setPortalMask(reveal > PORTAL_VISIBLE_THRESHOLD && !isClosing);
       }
-      voidMesh.mesh.visibility = BABYLON.Scalar.Clamp(formation * (1 - opening * 1.1), 0, 1)
+      voidMesh.mesh.visibility = BABYLON.Scalar.Clamp(formation, 0, 1)
         * closureVisibility;
       voidMesh.mesh.setEnabled(voidMesh.mesh.visibility > RIFT_VISIBILITY_EPSILON);
       // These decorative triangles visually read as broken parts of the house
