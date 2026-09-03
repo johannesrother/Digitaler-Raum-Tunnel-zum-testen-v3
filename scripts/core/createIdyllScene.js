@@ -2,6 +2,7 @@ import { createDesktopCamera } from "../camera/createDesktopCamera.js";
 import { createIdyllEnvironment } from "../environment/createIdyllEnvironment.js";
 import { createDreamyIdyll } from "../environment/createDreamyIdyll.js";
 import { createIdyllDesaturation } from "../environment/createIdyllDesaturation.js";
+import { createPreRiftLightDisturbance } from "../environment/createPreRiftLightDisturbance.js";
 import { createOrganicTunnel } from "../tunnel/createOrganicTunnel.js";
 import { clearTunnelTerrain, removeIdyllObjectsFromTunnel } from "../tunnel/clearTunnelTerrain.js";
 import { createIdyllTunnelTransition } from "../tunnel/createIdyllTunnelTransition.js";
@@ -65,6 +66,7 @@ export async function createIdyllScene(
   const riftSound = createRiftSound();
   const suctionSound = createSuctionSound();
   const tunnelSound = createTunnelSound();
+  let preRiftLightDisturbance = null;
   const whiteRoomTone = createWhiteRoomTone({
     onActivate: onWhiteRoomSoundStarted,
     onFadeStart: () => {
@@ -84,6 +86,7 @@ export async function createIdyllScene(
     initialForward: desktopCamera.getForwardRay(1).direction.clone(),
     whiteRoom,
     whiteRoomTone,
+    onIdyllUpdate: (elapsed, riftFormationStart) => preRiftLightDisturbance?.update(elapsed, riftFormationStart),
     onRiftOpening: () => riftSound.start(),
     onTunnelUpdate: (tunnelTime) => {
       idyllDesaturation.update(tunnelTime);
@@ -108,6 +111,7 @@ export async function createIdyllScene(
     },
     onIdyllHidden: () => dreamyIdyll.hide(),
     onExperienceReset: ({ preserveWhiteRoomEnding = false } = {}) => {
+      preRiftLightDisturbance?.reset();
       if (!preserveWhiteRoomEnding) {
         suctionWhiteFade.reset();
         whiteRoomTone.deactivate();
@@ -125,10 +129,14 @@ export async function createIdyllScene(
     previousWorldMeshes: scene.meshes.filter((mesh) => mesh.name !== "white-room-endless-void"),
     previousWorldLights: [...scene.lights],
   });
+  // Create after the transition's mesh/light snapshots: the temporary glints
+  // must never enter the Rift stencil, tunnel or White-Room world groups.
+  preRiftLightDisturbance = createPreRiftLightDisturbance(scene, dreamyIdyll.world);
   scene.metadata = {
     environment,
     dreamyIdyll,
     idyllDesaturation,
+    preRiftLightDisturbance,
     desktopCamera,
     tunnel,
     transition,
