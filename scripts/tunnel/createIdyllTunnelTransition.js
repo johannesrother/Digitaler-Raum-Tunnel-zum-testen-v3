@@ -120,7 +120,7 @@ export function createIdyllTunnelTransition(scene, options) {
     // normal travel into the final pull toward the White-Room aperture.
     if (!suctionSoundStarted && finalTunnelTravelTime(tunnelTime) !== tunnelTime) {
       suctionSoundStarted = true;
-      options.onSuctionStart?.();
+      options.onSuctionStart?.(tunnelTime, TUNNEL_DURATION);
     }
 
     // Start the already visible tunnel's wall motion before the visitor

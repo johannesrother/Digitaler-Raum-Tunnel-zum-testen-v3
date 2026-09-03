@@ -6,6 +6,7 @@ import { createOrganicTunnel } from "../tunnel/createOrganicTunnel.js";
 import { clearTunnelTerrain, removeIdyllObjectsFromTunnel } from "../tunnel/clearTunnelTerrain.js";
 import { createIdyllTunnelTransition } from "../tunnel/createIdyllTunnelTransition.js";
 import { createWhiteRoom } from "../whiteRoom/createWhiteRoom.js";
+import { createSuctionWhiteFade } from "../whiteRoom/createSuctionWhiteFade.js";
 import { createWhiteRoomTone } from "../audio/createWhiteRoomTone.js";
 import { createTunnelSound } from "../audio/createTunnelSound.js";
 import { createIdyllSound } from "../audio/createIdyllSound.js";
@@ -59,6 +60,7 @@ export async function createIdyllScene(
   exitDirection.y = 0;
   exitDirection.normalize();
   const whiteRoom = createWhiteRoom(scene, tunnelExit, exitDirection);
+  const suctionWhiteFade = createSuctionWhiteFade(scene);
   const idyllSound = createIdyllSound();
   const riftSound = createRiftSound();
   const suctionSound = createSuctionSound();
@@ -78,12 +80,17 @@ export async function createIdyllScene(
     whiteRoom,
     whiteRoomTone,
     onRiftOpening: () => riftSound.start(),
-    onTunnelUpdate: (tunnelTime) => idyllDesaturation.update(tunnelTime),
-    onSuctionStart: () => {
+    onTunnelUpdate: (tunnelTime) => {
+      idyllDesaturation.update(tunnelTime);
+      suctionWhiteFade.update(tunnelTime);
+    },
+    onSuctionStart: (tunnelTime, tunnelEndTime) => {
       suctionSound.start();
+      suctionWhiteFade.start(tunnelTime, tunnelEndTime);
       tunnelSound.fadeTo(0.28, 8);
     },
     onWhiteRoomEntry: () => {
+      suctionWhiteFade.finish();
       idyllDesaturation.reset();
       onWhiteRoomEntry?.();
       tunnelSound.fadeOutAndStop(2);
@@ -96,6 +103,7 @@ export async function createIdyllScene(
     },
     onIdyllHidden: () => dreamyIdyll.hide(),
     onExperienceReset: () => {
+      suctionWhiteFade.reset();
       idyllDesaturation.reset();
       idyllSound.stop();
       riftSound.stop();
@@ -120,6 +128,7 @@ export async function createIdyllScene(
     whiteRoom,
     whiteRoomTone,
     idyllSound,
+    suctionWhiteFade,
     riftSound,
     suctionSound,
     tunnelSound,
