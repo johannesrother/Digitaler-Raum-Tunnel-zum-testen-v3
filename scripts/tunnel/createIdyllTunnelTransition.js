@@ -78,6 +78,9 @@ export function createIdyllTunnelTransition(scene, options) {
   root.position.copyFrom(start);
   options.desktopCamera.parent = root;
   options.desktopCamera.position.set(0, options.desktopCamera.position.y - start.y, 0);
+  const initialCameraPosition = options.desktopCamera.position.clone();
+  const initialCameraRotation = options.desktopCamera.rotation.clone();
+  const initialCameraQuaternion = options.desktopCamera.rotationQuaternion?.clone() ?? null;
   const riftEntryProbe = () => {
     const camera = xrCamera ?? scene.activeCamera ?? options.desktopCamera;
     return {
@@ -223,10 +226,10 @@ export function createIdyllTunnelTransition(scene, options) {
         (xrCamera ?? scene.activeCamera ?? options.desktopCamera)?.minZ ?? 0,
       );
     },
-    reset() {
+    reset({ preserveWhiteRoomEnding = false } = {}) {
       // This returns the already loaded scene to its exact pre-start state;
       // no browser reload or asset reconstruction is needed for a repeat run.
-      options.onExperienceReset?.();
+      options.onExperienceReset?.({ preserveWhiteRoomEnding });
       elapsed = 0;
       experienceStarted = false;
       previousWorldHidden = false;
@@ -245,6 +248,11 @@ export function createIdyllTunnelTransition(scene, options) {
       rift.reset();
       root.position.copyFrom(start);
       root.rotation.set(0, 0, 0);
+      options.desktopCamera.position.copyFrom(initialCameraPosition);
+      options.desktopCamera.rotation.copyFrom(initialCameraRotation);
+      options.desktopCamera.rotationQuaternion = initialCameraQuaternion?.clone() ?? null;
+      options.desktopCamera.cameraDirection.set(0, 0, 0);
+      options.desktopCamera.cameraRotation.set(0, 0);
       previousFrameTime = performance.now();
       previousRiftEntryDistance = rift.entryPlaneDistance(
         root.position,

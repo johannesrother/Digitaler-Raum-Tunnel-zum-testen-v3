@@ -43,6 +43,12 @@ export function createSuctionWhiteFade(scene) {
       // the blend here would reveal a differently tone-mapped white for a frame.
       setFade(1);
     },
+    returnToIdyll(progress) {
+      startedAt = null;
+      endsAt = null;
+      // The audio supplies the shared eased progress; do not ease a second time.
+      setFade(1 - BABYLON.Scalar.Clamp(progress, 0, 1));
+    },
     reset() {
       startedAt = null;
       endsAt = null;

@@ -67,6 +67,11 @@ export async function createIdyllScene(
   const tunnelSound = createTunnelSound();
   const whiteRoomTone = createWhiteRoomTone({
     onActivate: onWhiteRoomSoundStarted,
+    onFadeStart: () => {
+      transition.reset({ preserveWhiteRoomEnding: true });
+      suctionWhiteFade.returnToIdyll(0);
+    },
+    onFadeProgress: (progress) => suctionWhiteFade.returnToIdyll(progress),
     onEnded: onWhiteRoomSoundEnded,
   });
   const transition = createIdyllTunnelTransition(scene, {
@@ -102,14 +107,16 @@ export async function createIdyllScene(
       tunnelSound.start({ fadeInDuration: 2.5 });
     },
     onIdyllHidden: () => dreamyIdyll.hide(),
-    onExperienceReset: () => {
-      suctionWhiteFade.reset();
+    onExperienceReset: ({ preserveWhiteRoomEnding = false } = {}) => {
+      if (!preserveWhiteRoomEnding) {
+        suctionWhiteFade.reset();
+        whiteRoomTone.deactivate();
+      }
       idyllDesaturation.reset();
       idyllSound.stop();
       riftSound.stop();
       suctionSound.stop();
       tunnelSound.stop();
-      whiteRoomTone.deactivate();
       dreamyIdyll.show();
     },
     idyllWorldMeshes: scene.meshes.filter((mesh) => (
