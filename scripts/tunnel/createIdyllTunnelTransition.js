@@ -165,8 +165,6 @@ export function createIdyllTunnelTransition(scene, options) {
       }
     }
 
-    options.onIdyllUpdate?.(elapsed, RIFT_FORM_START);
-
     // The rendered stencil aperture is the only authoritative world boundary.
     // Its plane is slightly in front of the route's entrance centre, so using
     // the later timeline boundary here briefly exposed the still-active idyll.
@@ -210,6 +208,14 @@ export function createIdyllTunnelTransition(scene, options) {
       riftSoundStarted = true;
       options.onRiftOpening?.();
     }
+
+    // Read-only visual accompaniment of the authoritative states above.
+    options.onIdyllUpdate?.(elapsed, RIFT_FORM_START, {
+      formation: riftFormation,
+      reveal: tunnelReveal,
+      entryDistance: riftEntryDistance,
+      entered: tunnelEntryPrepared,
+    });
 
     debug.update(elapsed, tunnelTime, tunnelRoute, tunnelEntryPrepared, riftFormation, riftApproachTime);
     flashDebug.capture(tunnelElapsed, tunnelTime, tunnelRoute, riftApproachTime);

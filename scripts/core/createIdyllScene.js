@@ -86,7 +86,7 @@ export async function createIdyllScene(
     initialForward: desktopCamera.getForwardRay(1).direction.clone(),
     whiteRoom,
     whiteRoomTone,
-    onIdyllUpdate: (elapsed, riftFormationStart) => preRiftLightDisturbance?.update(elapsed, riftFormationStart),
+    onIdyllUpdate: (elapsed, riftFormationStart, riftState) => preRiftLightDisturbance?.update(elapsed, riftFormationStart, riftState),
     onRiftOpening: () => riftSound.start(),
     onTunnelUpdate: (tunnelTime) => {
       idyllDesaturation.update(tunnelTime);
