@@ -27,7 +27,9 @@ export function createWhiteRoom(scene, tunnelEnd, exitDirection) {
     finalPosition,
     preview(amount) {
       const blend = BABYLON.Scalar.Clamp(amount, 0, 1);
-      voidMesh.setEnabled(blend > 0.0001);
+      // The enclosing sphere would intersect the visible transparent idyll.
+      // Keep it hidden until the existing handoff completes under pure white.
+      voidMesh.setEnabled(false);
       material.alpha = blend;
       material.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
       scene.clearColor = new BABYLON.Color4(
@@ -40,6 +42,7 @@ export function createWhiteRoom(scene, tunnelEnd, exitDirection) {
     },
     activate() {
       this.preview(1);
+      voidMesh.setEnabled(true);
     },
     reset() {
       voidMesh.setEnabled(false);
