@@ -2,7 +2,7 @@ import { createDesktopCamera } from "../camera/createDesktopCamera.js";
 import { createIdyllEnvironment } from "../environment/createIdyllEnvironment.js";
 import { createDreamyIdyll } from "../environment/createDreamyIdyll.js";
 import { createIdyllDesaturation } from "../environment/createIdyllDesaturation.js";
-import { createPreRiftLightDisturbance } from "../environment/createPreRiftLightDisturbance.js";
+import { createPreRiftLightDisturbance, PRE_RIFT_LIGHT_EVENTS } from "../environment/createPreRiftLightDisturbance.js";
 import { createOrganicTunnel } from "../tunnel/createOrganicTunnel.js";
 import { clearTunnelTerrain, removeIdyllObjectsFromTunnel } from "../tunnel/clearTunnelTerrain.js";
 import { createIdyllTunnelTransition } from "../tunnel/createIdyllTunnelTransition.js";
@@ -86,7 +86,12 @@ export async function createIdyllScene(
     initialForward: desktopCamera.getForwardRay(1).direction.clone(),
     whiteRoom,
     whiteRoomTone,
-    onIdyllUpdate: (elapsed, riftFormationStart, riftState) => preRiftLightDisturbance?.update(elapsed, riftFormationStart, riftState),
+    onIdyllUpdate: (elapsed, riftFormationStart, riftState) => {
+      preRiftLightDisturbance?.update(elapsed, riftFormationStart, riftState);
+      if (!riftState.entered && elapsed - riftFormationStart >= PRE_RIFT_LIGHT_EVENTS[0].offset) {
+        idyllSound.startStress();
+      }
+    },
     onRiftOpening: () => riftSound.start(),
     onTunnelUpdate: (tunnelTime) => {
       idyllDesaturation.update(tunnelTime);
