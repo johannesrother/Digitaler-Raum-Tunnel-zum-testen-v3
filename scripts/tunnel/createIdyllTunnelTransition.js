@@ -309,9 +309,21 @@ function createEntryPath(start, entrance, initialForward, finish) {
   direction.normalize();
   const controlA = start.add(direction.scale(4.2));
   const controlB = entrance.center.subtract(entrance.forward.scale(3.1));
+  const right = new BABYLON.Vector3(direction.z, 0, -direction.x);
+  const corridorEase = (value) => {
+    const t = BABYLON.Scalar.Clamp(value, 0, 1);
+    return t * t * t * (10 + t * (-15 + 6 * t));
+  };
   const points = [];
   for (let index = 0; index <= 88; index += 1) {
-    points.push(cubicBezier(start, controlA, controlB, finish, index / 88));
+    const progress = index / 88;
+    const point = cubicBezier(start, controlA, controlB, finish, progress);
+    // Stay right of the two early flower groups, then rejoin the unchanged
+    // approach before the Rift. Zero endpoint slope/curvature avoids a steering snap.
+    const corridorOffset = (0.4 * corridorEase(progress / 0.15)
+      + 1.0 * corridorEase((progress - 0.25) / 0.13))
+      * (1 - corridorEase((progress - 0.48) / 0.16));
+    points.push(point.add(right.scale(corridorOffset)));
   }
   return points;
 }
