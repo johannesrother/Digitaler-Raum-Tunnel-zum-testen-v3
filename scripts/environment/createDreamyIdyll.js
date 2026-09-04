@@ -8,6 +8,7 @@ const MEADOW_OUTER_RADII = [
   122, 126, 130, 134, 138, 142, 175, 220, 300, 450, 700, 1100, 2000,
 ];
 const CAMERA_START_RETREAT = 12;
+const CAMERA_START_RIGHT_SHIFT = 1;
 const ROUTE_LANDSCAPE_EXTRA_LENGTH = 18;
 const ROUTE_GRASS_COUNT = 9000;
 const REAR_MEADOW_GRASS_COUNT = 15000;
@@ -100,7 +101,7 @@ export async function createDreamyIdyll(scene, startPosition) {
   );
   const atmosphere = createAtmosphere(scene, world, startPosition, vegetation.swayAnchors, sky);
   let routeExtension = null;
-  const cameraStartPosition = createRetreatedCameraStart(startPosition, house.position);
+  const cameraStartPosition = createRetreatedCameraStart(startPosition, house.position, house.approachTarget);
 
   return {
     world,
@@ -542,12 +543,15 @@ function getRouteLandscapeHeight(x, z, startPosition, progress, edgeRatio) {
   return BABYLON.Scalar.Lerp(routeRoll, originalHeight, originalBlend) + edgeLift;
 }
 
-function createRetreatedCameraStart(startPosition, housePosition) {
+function createRetreatedCameraStart(startPosition, housePosition, approachTarget) {
   const towardHouse = housePosition.subtract(startPosition);
   towardHouse.y = 0;
   towardHouse.normalize();
   const cameraStart = startPosition.subtract(towardHouse.scale(CAMERA_START_RETREAT));
   cameraStart.y = getMeadowHeight(cameraStart.x, cameraStart.z, startPosition);
+  // Shift horizontally to the viewer's right, preserving the existing approach spline.
+  const right = BABYLON.Vector3.Cross(BABYLON.Axis.Y, approachTarget.subtract(cameraStart)).normalize();
+  cameraStart.addInPlace(right.scale(CAMERA_START_RIGHT_SHIFT));
   return cameraStart;
 }
 
